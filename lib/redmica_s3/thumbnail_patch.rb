@@ -9,9 +9,7 @@ module RedmicaS3
     class_methods do
       def batch_delete!(target_prefix = nil)
         prefix = File.join(RedmicaS3::Connection.thumb_folder, "#{target_prefix}")
-
-        bucket = RedmicaS3::Connection.__send__(:own_bucket)
-        bucket.objects({prefix: prefix}).batch_delete!
+        RedmicaS3::Connection.batch_delete(prefix)
         return
       end
     end
@@ -30,11 +28,11 @@ module RedmicaS3
           return nil if is_pdf && !gs_available?
 
           target_folder = RedmicaS3::Connection.thumb_folder
-          object = RedmicaS3::Connection.object(target, target_folder)
+          object = RedmicaS3::Connection.object_reload(target, target_folder)
           unless object.exists?
             return nil unless Object.const_defined?(:MiniMagick)
 
-            raw_data = RedmicaS3::Connection.object(source).reload.get.body.read rescue nil
+            raw_data = RedmicaS3::Connection.object_data(source).read rescue nil
             mime_type = Marcel::MimeType.for(raw_data)
             return nil if !Redmine::Thumbnail::ALLOWED_TYPES.include? mime_type
             return nil if is_pdf && mime_type != "application/pdf"
@@ -74,8 +72,7 @@ module RedmicaS3
             end
           end
 
-          object.reload
-          [object.metadata['digest'], object.get.body.read]
+          [object.metadata['digest'], RedmicaS3::Connection.object_data(target, target_folder).read]
         end
       end
     end

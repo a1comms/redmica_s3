@@ -39,13 +39,14 @@ module RedmicaS3
           directory = directory.to_s
           result =
             loop do
-              s3obj = RedmicaS3::Connection.object(File.join(directory, "#{timestamp}_#{ascii}"))
+              tempfilename = File.join(directory, "#{timestamp}_#{ascii}")
+              s3obj = RedmicaS3::Connection.object(tempfilename)
               if s3obj.exists?
                 timestamp.succ!
               else
                 # Avoid race condition: Create an empty S3 object
-                s3obj.put
-                break File.basename(s3obj.key)
+                RedmicaS3::Connection.put(tempfilename, "", "")
+                break File.basename(tempfilename)
               end
             end
           result
@@ -186,18 +187,12 @@ module RedmicaS3
       def update_digest_to_sha256!
         return unless readable?
 
-        object = self.s3_object
         sha = Digest::SHA256.new
-        sha.update(object.get.body.read)
+        sha.update(self.raw_data)
         new_digest = sha.hexdigest
 
         unless new_digest == object.metadata['digest']
-          object.copy_from(object,
-            content_disposition:  object.content_disposition,
-            content_type:         object.content_type,
-            metadata:             object.metadata.merge({'digest' => new_digest}),
-            metadata_directive:   'REPLACE'
-          )
+          RedmicaS3::Connection.update_object_metadata(diskfile, {'digest' => new_digest})
         end
 
         unless new_digest == self.digest
@@ -217,11 +212,15 @@ module RedmicaS3
                           .order(:id)
                           .last
             existing.with_lock do
-              if self.readable? && existing.readable? &&
-                object.metadata['digest'] == existing.s3_object.metadata['digest']
+              if self.readable? && existing.readable?
+                if !existing.s3_object.metadata.key?('digest')
+                  existing.update_digest_to_sha256!
+                end
 
-                self.update_columns disk_directory: existing.disk_directory,
-                                    disk_filename: existing.disk_filename
+                if object.metadata['digest'] == existing.s3_object.metadata['digest']
+                  self.update_columns disk_directory: existing.disk_directory,
+                                      disk_filename: existing.disk_filename
+                end
               end
             end
           end
@@ -255,15 +254,13 @@ module RedmicaS3
     end
 
     def raw_data
-      self.s3_object.get.body.read
+      RedmicaS3::Connection.object_data(diskfile).read
     end
 
   protected
 
     def s3_object(reload = true)
-      object = RedmicaS3::Connection.object(diskfile)
-      object.reload if reload && !object.data_loaded?
-      object
+      RedmicaS3::Connection.object_reload(diskfile, reload)
     end
 
   end

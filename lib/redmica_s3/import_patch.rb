@@ -23,7 +23,7 @@ module RedmicaS3
         separator = lu(user, :general_csv_separator)
         if file_exists?
           begin
-            content = s3_object.get.body.read(256)
+            content = RedmicaS3::Connection.object_data(filepath).read(256)
             separator = [',', ';'].sort_by {|sep| content.count(sep) }.last
           rescue => e
           end
@@ -67,7 +67,7 @@ module RedmicaS3
         return unless file_exists?
 
         from_encoding = settings['encoding'].to_s.presence || 'UTF-8'
-        raw = s3_object.get.body.read
+        raw = self.raw_data
         if from_encoding == 'UTF-8'
           raw = raw[1..-1] if raw[0] == "\ufeff"  # Remove BOM
         end
@@ -94,13 +94,15 @@ module RedmicaS3
       end
 
     end
+    
+    def raw_data
+      RedmicaS3::Connection.object_data(filepath).read
+    end
 
   protected
 
     def s3_object(reload = true)
-      object = RedmicaS3::Connection.object(filepath, nil)
-      object.reload if reload && !object.data_loaded?
-      object
+      RedmicaS3::Connection.object_reload(filepath, reload)
     end
 
   end
